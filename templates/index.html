@@ -1,0 +1,849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Smart Lost &amp; Found Platform – AI-Based Image Matching &amp; Location Search</title>
+  
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- React 18, ReactDOM, Babel Standalone & Axios -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+
+  <style>
+    /* Embedded styles matching frontend/src/index.css */
+    :root {
+      --primary: #1e3a8a;
+      --primary-hover: #1d4ed8;
+      --secondary: #0d9488;
+      --secondary-hover: #0f766e;
+      --danger: #dc2626;
+      --dark: #0f172a;
+      --light: #f8fafc;
+      --surface: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --text-muted: #64748b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--light); color: var(--text); }
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
+    .btn { display: inline-flex; align-items: center; justify-content: center; font-weight: 600; padding: 8px 16px; border-radius: 6px; cursor: pointer; text-decoration: none; border: 1px solid transparent; font-size: 0.88rem; transition: 0.2s; }
+    .btn-primary { background: var(--primary); color: #fff; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-secondary { background: var(--secondary); color: #fff; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-outline { background: transparent; border-color: var(--border); color: #334155; }
+    .btn-outline:hover { background: #f1f5f9; }
+    .card { background: #fff; border-radius: 10px; border: 1px solid var(--border); box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
+    .navbar { background: #fff; border-bottom: 1px solid var(--border); height: 64px; position: sticky; top: 0; z-index: 100; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+    .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 100%; }
+    .brand { font-size: 1.25rem; font-weight: 800; color: var(--primary); text-decoration: none; display: flex; align-items: center; gap: 8px; }
+    .nav-menu { display: flex; align-items: center; gap: 12px; }
+    .nav-item { text-decoration: none; color: #475569; font-size: 0.88rem; font-weight: 500; padding: 6px 10px; border-radius: 6px; }
+    .nav-item:hover, .nav-item.active { color: var(--primary); background: #eff6ff; font-weight: 600; }
+    .hero { background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 50%, #0f766e 100%); color: #fff; padding: 64px 0 80px 0; text-align: center; }
+    .cards-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 20px; }
+    .badge { padding: 3px 8px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; display: inline-block; }
+    .badge-high { background: #ecfdf5; color: #059669; border: 1px solid #a7f3d0; }
+    .badge-medium { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+    .badge-low { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; }
+    .form-group { margin-bottom: 16px; }
+    .form-label { display: block; font-size: 0.82rem; font-weight: 600; margin-bottom: 6px; }
+    .form-input { width: 100%; padding: 10px 14px; border-radius: 6px; border: 1px solid var(--border); font-size: 0.9rem; outline: none; }
+    .form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.15); }
+    .footer { background: var(--dark); color: #94a3b8; padding: 48px 0 24px 0; margin-top: 60px; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- In-Browser React Application -->
+  {% verbatim %}
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const api = axios.create({ baseURL: '/api' });
+    api.interceptors.request.use((config) => {
+      const token = localStorage.getItem('access_token');
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+      return config;
+    });
+
+    function App() {
+      const [route, setRoute] = useState('home');
+      const [routeParam, setRouteParam] = useState(null);
+      const [user, setUser] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('user_info')); } catch { return null; }
+      });
+      const [notifications, setNotifications] = useState([]);
+
+      useEffect(() => {
+        if (user) {
+          api.get('/notifications/').then(r => setNotifications(r.data.results || r.data)).catch(() => {});
+        }
+      }, [user]);
+
+      const navigate = (newRoute, param = null) => {
+        setRoute(newRoute);
+        setRouteParam(param);
+        window.scrollTo(0, 0);
+      };
+
+      const handleLoginSuccess = (userData, access, refresh) => {
+        localStorage.setItem('access_token', access);
+        localStorage.setItem('refresh_token', refresh);
+        localStorage.setItem('user_info', JSON.stringify(userData));
+        setUser(userData);
+        navigate('dashboard');
+      };
+
+      const handleLogout = () => {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        localStorage.removeItem('user_info');
+        setUser(null);
+        navigate('login');
+      };
+
+      return (
+        <div>
+          {/* Navbar */}
+          <nav className="navbar">
+            <div className="container nav-inner">
+              <a href="#" onClick={(e) => { e.preventDefault(); navigate('home'); }} className="brand">
+                <span>🔍</span>
+                <span>Smart<span style={{ color: '#0d9488' }}>Lost</span>&amp;Found</span>
+              </a>
+
+              <div className="nav-menu">
+                <a href="#" className={`nav-item ${route === 'home' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('home'); }}>Home</a>
+                <a href="#" className={`nav-item ${route === 'lost' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('lost'); }}>Lost Items</a>
+                <a href="#" className={`nav-item ${route === 'found' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('found'); }}>Found Items</a>
+                <a href="#" className={`nav-item ${route === 'matches' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('matches'); }}>✨ AI Matches</a>
+                <a href="#" className={`nav-item ${route === 'map' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('map'); }}>🗺️ Nearby Map</a>
+
+                {user ? (
+                  <>
+                    <button onClick={() => navigate('report-lost')} className="btn btn-danger" style={{ padding: '5px 12px', fontSize: '0.8rem' }}>+ Report Lost</button>
+                    <button onClick={() => navigate('report-found')} className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: '0.8rem' }}>+ Report Found</button>
+                    <a href="#" className={`nav-item ${route === 'dashboard' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('dashboard'); }}>My Dashboard</a>
+                    {user.role === 'admin' && (
+                      <a href="#" className={`nav-item ${route === 'admin' ? 'active' : ''}`} onClick={(e) => { e.preventDefault(); navigate('admin'); }} style={{ color: '#7c3aed', fontWeight: 700 }}>Admin</a>
+                    )}
+                    <button onClick={handleLogout} className="btn btn-outline" style={{ padding: '4px 10px', fontSize: '0.78rem' }}>Sign Out</button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={() => navigate('login')} className="btn btn-outline" style={{ padding: '6px 14px' }}>Sign In</button>
+                    <button onClick={() => navigate('register')} className="btn btn-primary" style={{ padding: '6px 14px' }}>Register</button>
+                  </>
+                )}
+              </div>
+            </div>
+          </nav>
+
+          {/* Main View Router */}
+          <main>
+            {route === 'home' && <HomeView navigate={navigate} />}
+            {route === 'lost' && <LostView navigate={navigate} />}
+            {route === 'found' && <FoundView navigate={navigate} />}
+            {route === 'matches' && <MatchesView navigate={navigate} />}
+            {route === 'map' && <MapView navigate={navigate} />}
+            {route === 'report-lost' && <ReportLostView navigate={navigate} user={user} />}
+            {route === 'report-found' && <ReportFoundView navigate={navigate} user={user} />}
+            {route === 'dashboard' && <DashboardView navigate={navigate} user={user} />}
+            {route === 'claims' && <ClaimsView navigate={navigate} user={user} />}
+            {route === 'admin' && <AdminView navigate={navigate} user={user} />}
+            {route === 'login' && <LoginView navigate={navigate} onLogin={handleLoginSuccess} />}
+            {route === 'register' && <RegisterView navigate={navigate} onLogin={handleLoginSuccess} />}
+            {route === 'item-detail' && <ItemDetailView navigate={navigate} param={routeParam} user={user} />}
+          </main>
+
+          {/* Footer */}
+          <footer className="footer">
+            <div className="container" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+              <div>
+                <strong>Smart Lost &amp; Found Platform</strong> &bull; CLIP AI Model &bull; Cosine Similarity &bull; OpenStreetMap
+              </div>
+              <div>
+                API Root: <a href="/api/" target="_blank" style={{ color: '#38bdf8' }}>/api/</a> &bull; MySQL Database Ready
+              </div>
+            </div>
+          </footer>
+        </div>
+      );
+    }
+
+    /* ==================== 1. HOME VIEW ==================== */
+    function HomeView({ navigate }) {
+      const [lostItems, setLostItems] = useState([]);
+      const [foundItems, setFoundItems] = useState([]);
+
+      useEffect(() => {
+        api.get('/lost-items/').then(r => setLostItems((r.data.results || r.data).slice(0, 4))).catch(() => {});
+        api.get('/found-items/').then(r => setFoundItems((r.data.results || r.data).slice(0, 4))).catch(() => {});
+      }, []);
+
+      return (
+        <div>
+          <section className="hero">
+            <div className="container" style={{ maxWidth: '800px' }}>
+              <div style={{ display: 'inline-block', padding: '4px 12px', background: 'rgba(255,255,255,0.15)', borderRadius: '20px', fontSize: '0.8rem', marginBottom: '16px' }}>
+                ⚡ CLIP Deep Learning &bull; Cosine Similarity &bull; Leaflet Geolocation
+              </div>
+              <h1 style={{ fontSize: '2.6rem', fontWeight: 800, marginBottom: '14px', lineHeight: 1.2 }}>
+                Reconnecting People With What They've <span style={{ color: '#38bdf8' }}>Lost</span> &amp; <span style={{ color: '#2dd4bf' }}>Found</span>
+              </h1>
+              <p style={{ color: '#cbd5e1', fontSize: '1.05rem', lineHeight: 1.6, marginBottom: '28px' }}>
+                Report missing belongings with photographs. Our computer vision matching engine analyzes visual embeddings, colors, and coordinates to automatically identify matches.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+                <button onClick={() => navigate('report-lost')} className="btn btn-danger" style={{ padding: '12px 24px', fontSize: '1rem' }}>🚨 Report Lost Item</button>
+                <button onClick={() => navigate('report-found')} className="btn btn-secondary" style={{ padding: '12px 24px', fontSize: '1rem' }}>🎁 Report Found Item</button>
+                <button onClick={() => navigate('map')} className="btn btn-outline" style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)', padding: '12px 24px', fontSize: '1rem' }}>🗺️ Nearby Map</button>
+              </div>
+            </div>
+          </section>
+
+          <section style={{ padding: '40px 0' }}>
+            <div className="container">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Recent Lost Belongings</h2>
+                <button onClick={() => navigate('lost')} className="btn btn-outline">View All Lost &rarr;</button>
+              </div>
+              <div className="cards-grid">
+                {lostItems.map(item => (
+                  <ItemCardMini key={item.id} item={item} type="lost" navigate={navigate} />
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <section style={{ padding: '40px 0', background: '#f1f5f9' }}>
+            <div className="container">
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+                <h2>Recently Found Belongings</h2>
+                <button onClick={() => navigate('found')} className="btn btn-outline">View All Found &rarr;</button>
+              </div>
+              <div className="cards-grid">
+                {foundItems.map(item => (
+                  <ItemCardMini key={item.id} item={item} type="found" navigate={navigate} />
+                ))}
+              </div>
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    function ItemCardMini({ item, type, navigate }) {
+      const isLost = type === 'lost';
+      const defaultImg = isLost
+        ? 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=400&auto=format&fit=crop&q=60'
+        : 'https://images.unsplash.com/photo-1544816155-12df9643f363?w=400&auto=format&fit=crop&q=60';
+      const img = item.images && item.images.length > 0 && item.images[0].image ? item.images[0].image : defaultImg;
+
+      return (
+        <div className="card" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ height: '170px', overflow: 'hidden', position: 'relative' }}>
+            <img src={img} alt={item.title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <span style={{ position: 'absolute', top: 8, left: 8, background: isLost ? '#ef4444' : '#0d9488', color: '#fff', fontSize: '0.7rem', fontWeight: 700, padding: '2px 8px', borderRadius: '4px' }}>
+              {isLost ? 'LOST' : 'FOUND'}
+            </span>
+          </div>
+          <div style={{ padding: '14px', flex: 1, display: 'flex', flexDirection: 'column' }}>
+            <h4 style={{ fontSize: '0.98rem', fontWeight: 700, marginBottom: '6px' }}>{item.title}</h4>
+            <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px', height: '2.4em', overflow: 'hidden' }}>{item.description}</p>
+            <div style={{ fontSize: '0.78rem', color: '#475569', marginBottom: '12px', marginTop: 'auto' }}>
+              📍 {item.location_area}, {item.city}
+            </div>
+            <button onClick={() => navigate('item-detail', { type, id: item.id })} className="btn btn-outline" style={{ width: '100%', fontSize: '0.8rem' }}>
+              View Details &rarr;
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 2. LOST VIEW ==================== */
+    function LostView({ navigate }) {
+      const [items, setItems] = useState([]);
+      const [search, setSearch] = useState('');
+      const [city, setCity] = useState('');
+
+      const fetchItems = () => {
+        api.get('/lost-items/', { params: { search, city } })
+          .then(r => setItems(r.data.results || r.data))
+          .catch(() => {});
+      };
+      useEffect(() => { fetchItems(); }, []);
+
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h1>Lost Belongings Directory</h1>
+            <button onClick={() => navigate('report-lost')} className="btn btn-danger">+ Report Lost Item</button>
+          </div>
+          <div className="card" style={{ padding: '14px', marginBottom: '20px', display: 'flex', gap: '10px' }}>
+            <input type="text" placeholder="Search keyword..." className="form-input" value={search} onChange={e => setSearch(e.target.value)} />
+            <input type="text" placeholder="City..." className="form-input" style={{ width: '180px' }} value={city} onChange={e => setCity(e.target.value)} />
+            <button onClick={fetchItems} className="btn btn-primary">Filter</button>
+          </div>
+          <div className="cards-grid">
+            {items.map(item => <ItemCardMini key={item.id} item={item} type="lost" navigate={navigate} />)}
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 3. FOUND VIEW ==================== */
+    function FoundView({ navigate }) {
+      const [items, setItems] = useState([]);
+      const [search, setSearch] = useState('');
+
+      const fetchItems = () => {
+        api.get('/found-items/', { params: { search } })
+          .then(r => setItems(r.data.results || r.data))
+          .catch(() => {});
+      };
+      useEffect(() => { fetchItems(); }, []);
+
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+            <h1>Found Belongings Catalog</h1>
+            <button onClick={() => navigate('report-found')} className="btn btn-secondary">+ Report Found Item</button>
+          </div>
+          <div className="card" style={{ padding: '14px', marginBottom: '20px', display: 'flex', gap: '10px' }}>
+            <input type="text" placeholder="Search keyword..." className="form-input" value={search} onChange={e => setSearch(e.target.value)} />
+            <button onClick={fetchItems} className="btn btn-primary">Filter</button>
+          </div>
+          <div className="cards-grid">
+            {items.map(item => <ItemCardMini key={item.id} item={item} type="found" navigate={navigate} />)}
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 4. AI MATCHES VIEW ==================== */
+    function MatchesView({ navigate }) {
+      const [matches, setMatches] = useState([]);
+      const [loading, setLoading] = useState(true);
+
+      const loadMatches = () => {
+        setLoading(true);
+        api.get('/matches/').then(r => setMatches(r.data.results || r.data)).finally(() => setLoading(false));
+      };
+      useEffect(() => { loadMatches(); }, []);
+
+      const runBatch = () => {
+        setLoading(true);
+        api.post('/matches/generate/').then(() => loadMatches()).finally(() => setLoading(false));
+      };
+
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
+            <div>
+              <h1 style={{ margin: 0 }}>✨ AI Image &amp; Location Matches</h1>
+              <p style={{ color: '#64748b', fontSize: '0.9rem' }}>Cosine similarity calculated from 512-dimensional visual embeddings</p>
+            </div>
+            <button onClick={runBatch} className="btn btn-primary">↻ Run Global AI Matching</button>
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: '50px' }}>Computing image embeddings &amp; cosine similarity...</div>
+          ) : matches.length === 0 ? (
+            <div className="card" style={{ padding: '40px', textAlign: 'center' }}>No AI matches computed yet. Click "Run Global AI Matching".</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              {matches.map(m => (
+                <div key={m.id} className="card" style={{ padding: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 800 }}>AI Match #{m.id}</span>
+                      <span className={`badge ${m.combined_score >= 75 ? 'badge-high' : m.combined_score >= 50 ? 'badge-medium' : 'badge-low'}`}>
+                        {m.combined_score.toFixed(1)}% ({m.confidence_level})
+                      </span>
+                    </div>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Status: <strong>{m.status.toUpperCase()}</strong></span>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{ background: '#fef2f2', padding: '10px', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#dc2626', fontWeight: 700 }}>🔴 LOST ITEM</div>
+                      <div style={{ fontWeight: 600 }}>{m.lost_item?.title}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>📍 {m.lost_item?.city} &bull; {m.lost_item?.category}</div>
+                    </div>
+                    <div style={{ background: '#f0fdfa', padding: '10px', borderRadius: '6px' }}>
+                      <div style={{ fontSize: '0.72rem', color: '#0d9488', fontWeight: 700 }}>🟢 FOUND ITEM</div>
+                      <div style={{ fontWeight: 600 }}>{m.found_item?.title}</div>
+                      <div style={{ fontSize: '0.8rem', color: '#64748b' }}>📍 {m.found_item?.city} &bull; {m.found_item?.category}</div>
+                    </div>
+                  </div>
+
+                  <p style={{ fontSize: '0.82rem', color: '#475569', background: '#f8fafc', padding: '8px 12px', borderRadius: '6px', marginBottom: '12px' }}>
+                    💡 {m.explanation}
+                  </p>
+
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button onClick={() => navigate('item-detail', { type: 'lost', id: m.lost_item?.id })} className="btn btn-outline" style={{ fontSize: '0.78rem' }}>View Lost Item</button>
+                    <button onClick={() => navigate('item-detail', { type: 'found', id: m.found_item?.id })} className="btn btn-outline" style={{ fontSize: '0.78rem' }}>View Found Item</button>
+                    <button onClick={() => navigate('claims', { foundId: m.found_item?.id, lostId: m.lost_item?.id })} className="btn btn-secondary" style={{ fontSize: '0.78rem' }}>Claim Item &rarr;</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ==================== 5. MAP VIEW ==================== */
+    function MapView() {
+      const [locations, setLocations] = useState([]);
+
+      useEffect(() => {
+        api.get('/locations/').then(r => setLocations(r.data)).catch(() => {});
+      }, []);
+
+      useEffect(() => {
+        if (window.L && document.getElementById('main-map')) {
+          const map = L.map('main-map').setView([37.7749, -122.4194], 12);
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+          locations.forEach(loc => {
+            const isLost = loc.item_type === 'lost';
+            const marker = L.marker([parseFloat(loc.latitude), parseFloat(loc.longitude)]).addTo(map);
+            marker.bindPopup(`<b>${isLost ? '🔴 LOST' : '🟢 FOUND'}: ${loc.item_title}</b><br/>${loc.area}, ${loc.city}`);
+          });
+
+          return () => map.remove();
+        }
+      }, [locations]);
+
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <h1>🗺️ OpenStreetMap Location Discovery</h1>
+          <p style={{ color: '#64748b', marginBottom: '16px' }}>Displaying registered item locations via Haversine geolocation coordinates</p>
+          <div id="main-map" style={{ width: '100%', height: '480px', borderRadius: '10px' }} />
+        </div>
+      );
+    }
+
+    /* ==================== 6. REPORT LOST VIEW ==================== */
+    function ReportLostView({ navigate }) {
+      const [title, setTitle] = useState('');
+      const [category, setCategory] = useState('Electronics');
+      const [colour, setColour] = useState('Black');
+      const [dateLost, setDateLost] = useState(new Date().toISOString().split('T')[0]);
+      const [city, setCity] = useState('San Francisco');
+      const [area, setArea] = useState('');
+      const [desc, setDesc] = useState('');
+      const [image, setImage] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        setLoading(true);
+        const data = new FormData();
+        data.append('title', title);
+        data.append('category', category);
+        data.append('colour', colour);
+        data.append('date_lost', dateLost);
+        data.append('city', city);
+        data.append('location_area', area);
+        data.append('description', desc);
+        data.append('latitude', '37.7749');
+        data.append('longitude', '-122.4194');
+        if (image) data.append('image', image);
+
+        api.post('/lost-items/', data, { headers: { 'Content-Type': 'multipart/form-data' } })
+          .then(r => {
+            alert("Lost item reported! AI embeddings extracted and matching executed.");
+            navigate('lost');
+          })
+          .catch(err => alert("Error saving report."))
+          .finally(() => setLoading(false));
+      };
+
+      return (
+        <div className="container" style={{ padding: '30px 16px', maxWidth: '700px' }}>
+          <h1 style={{ color: '#dc2626' }}>🚨 Report Lost Belonging</h1>
+          <form onSubmit={handleSubmit} className="card" style={{ padding: '24px', marginTop: '16px' }}>
+            <div className="form-group">
+              <label className="form-label">Item Title *</label>
+              <input type="text" required className="form-input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Dell XPS Laptop" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select className="form-input" value={category} onChange={e => setCategory(e.target.value)}>
+                  {['Electronics', 'Documents', 'Accessories', 'Bags', 'Jewellery', 'Clothing', 'Books', 'Other'].map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Primary Colour</label>
+                <input type="text" className="form-input" value={colour} onChange={e => setColour(e.target.value)} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Description *</label>
+              <textarea rows="3" required className="form-input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Distinctive marks..." />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">City *</label>
+                <input type="text" required className="form-input" value={city} onChange={e => setCity(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Location / Area *</label>
+                <input type="text" required className="form-input" value={area} onChange={e => setArea(e.target.value)} placeholder="e.g. Main Library Floor 2" />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Photograph (For AI CLIP Matching)</label>
+              <input type="file" accept="image/*" className="form-input" onChange={e => setImage(e.target.files[0])} />
+            </div>
+            <button type="submit" disabled={loading} className="btn btn-danger" style={{ width: '100%', padding: '12px' }}>
+              {loading ? 'Processing Visual Embeddings...' : 'Submit Lost Report'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    /* ==================== 7. REPORT FOUND VIEW ==================== */
+    function ReportFoundView({ navigate }) {
+      const [title, setTitle] = useState('');
+      const [category, setCategory] = useState('Electronics');
+      const [colour, setColour] = useState('Silver');
+      const [dateFound, setDateFound] = useState(new Date().toISOString().split('T')[0]);
+      const [city, setCity] = useState('San Francisco');
+      const [area, setArea] = useState('');
+      const [desc, setDesc] = useState('');
+      const [image, setImage] = useState(null);
+      const [loading, setLoading] = useState(false);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        setLoading(true);
+        const data = new FormData();
+        data.append('title', title);
+        data.append('category', category);
+        data.append('colour', colour);
+        data.append('date_found', dateFound);
+        data.append('city', city);
+        data.append('location_area', area);
+        data.append('description', desc);
+        data.append('latitude', '37.7751');
+        data.append('longitude', '-122.4192');
+        if (image) data.append('image', image);
+
+        api.post('/found-items/', data, { headers: { 'Content-Type': 'multipart/form-data' } })
+          .then(() => {
+            alert("Found item reported! AI visual matching computed.");
+            navigate('found');
+          })
+          .catch(() => alert("Error saving found report."))
+          .finally(() => setLoading(false));
+      };
+
+      return (
+        <div className="container" style={{ padding: '30px 16px', maxWidth: '700px' }}>
+          <h1 style={{ color: '#0d9488' }}>🎁 Report Found Belonging</h1>
+          <form onSubmit={handleSubmit} className="card" style={{ padding: '24px', marginTop: '16px' }}>
+            <div className="form-group">
+              <label className="form-label">Item Title *</label>
+              <input type="text" required className="form-input" value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Dell Laptop in Black Sleeve" />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select className="form-input" value={category} onChange={e => setCategory(e.target.value)}>
+                  {['Electronics', 'Documents', 'Accessories', 'Bags', 'Jewellery', 'Clothing', 'Books', 'Other'].map(c => <option key={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Colour</label>
+                <input type="text" className="form-input" value={colour} onChange={e => setColour(e.target.value)} />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Description *</label>
+              <textarea rows="3" required className="form-input" value={desc} onChange={e => setDesc(e.target.value)} placeholder="Condition, location where found..." />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">City *</label>
+                <input type="text" required className="form-input" value={city} onChange={e => setCity(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Area / Spot *</label>
+                <input type="text" required className="form-input" value={area} onChange={e => setArea(e.target.value)} placeholder="e.g. Study table window" />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Photograph *</label>
+              <input type="file" accept="image/*" className="form-input" onChange={e => setImage(e.target.files[0])} />
+            </div>
+            <button type="submit" disabled={loading} className="btn btn-secondary" style={{ width: '100%', padding: '12px' }}>
+              {loading ? 'Analyzing Embeddings...' : 'Submit Found Report'}
+            </button>
+          </form>
+        </div>
+      );
+    }
+
+    /* ==================== 8. DASHBOARD VIEW ==================== */
+    function DashboardView({ navigate, user }) {
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <h1>Citizen Dashboard</h1>
+          <p style={{ color: '#64748b' }}>Logged in as: <strong>{user?.email}</strong> &bull; Role: <strong>{user?.role?.toUpperCase()}</strong></p>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', margin: '20px 0' }}>
+            <div className="card" style={{ padding: '20px' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>📦 My Reports</div>
+              <p style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '6px' }}>Manage all items you have reported</p>
+              <button onClick={() => navigate('lost')} className="btn btn-outline" style={{ marginTop: '10px' }}>View Items</button>
+            </div>
+            <div className="card" style={{ padding: '20px' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>✨ AI Matches</div>
+              <p style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '6px' }}>View visual and geographic matches</p>
+              <button onClick={() => navigate('matches')} className="btn btn-primary" style={{ marginTop: '10px' }}>View Matches</button>
+            </div>
+            <div className="card" style={{ padding: '20px' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 800 }}>🛡️ Claims</div>
+              <p style={{ fontSize: '0.82rem', color: '#64748b', marginTop: '6px' }}>Track ownership verification claims</p>
+              <button onClick={() => navigate('claims')} className="btn btn-secondary" style={{ marginTop: '10px' }}>Manage Claims</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 9. CLAIMS VIEW ==================== */
+    function ClaimsView({ navigate, user }) {
+      const [claims, setClaims] = useState([]);
+      const [foundId, setFoundId] = useState('1');
+      const [proof, setProof] = useState('');
+      const [secret, setSecret] = useState('');
+
+      const loadClaims = () => {
+        api.get('/claims/').then(r => setClaims(r.data.results || r.data)).catch(() => {});
+      };
+      useEffect(() => { loadClaims(); }, []);
+
+      const submitClaim = (e) => {
+        e.preventDefault();
+        api.post('/claims/', {
+          found_item: foundId,
+          proof_description: proof,
+          secret_identifiers: secret
+        }).then(() => {
+          alert("Claim submitted with private proof details!");
+          loadClaims();
+        }).catch(err => alert("Error submitting claim."));
+      };
+
+      return (
+        <div className="container" style={{ padding: '30px 16px', maxWidth: '800px' }}>
+          <h1>🛡️ Ownership Verification &amp; Claims</h1>
+          <form onSubmit={submitClaim} className="card" style={{ padding: '20px', margin: '20px 0' }}>
+            <h3>File a New Ownership Claim</h3>
+            <div className="form-group" style={{ marginTop: '12px' }}>
+              <label className="form-label">Found Item ID</label>
+              <input type="number" required className="form-input" value={foundId} onChange={e => setFoundId(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Private Proof Description *</label>
+              <textarea rows="3" required className="form-input" value={proof} onChange={e => setProof(e.target.value)} placeholder="Unique scratches, lock screen wallpaper..." />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confidential Serial Number / Password Hint</label>
+              <input type="text" className="form-input" value={secret} onChange={e => setSecret(e.target.value)} placeholder="e.g. Serial #87DFX92" />
+            </div>
+            <button type="submit" className="btn btn-secondary">Submit Claim</button>
+          </form>
+
+          <h3>Active Claims ({claims.length})</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '12px' }}>
+            {claims.map(c => (
+              <div key={c.id} className="card" style={{ padding: '14px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <strong>Claim #{c.id} &bull; Item: {c.found_item_title}</strong>
+                  <span className="badge badge-medium">{c.status.toUpperCase()}</span>
+                </div>
+                <div style={{ fontSize: '0.82rem', color: '#64748b', margin: '6px 0' }}>Claimant: {c.claimant_email}</div>
+                <div style={{ background: '#f8fafc', padding: '8px', borderRadius: '4px', fontSize: '0.82rem' }}>
+                  <strong>Proof:</strong> {c.proof_description}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 10. ADMIN VIEW ==================== */
+    function AdminView({ navigate }) {
+      const [stats, setStats] = useState(null);
+
+      useEffect(() => {
+        api.get('/dashboard/stats/').then(r => setStats(r.data)).catch(() => {});
+      }, []);
+
+      const s = stats?.summary || {};
+
+      return (
+        <div className="container" style={{ padding: '30px 16px' }}>
+          <h1 style={{ color: '#7c3aed' }}>👑 Administrator Dashboard</h1>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '14px', margin: '20px 0' }}>
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{s.total_users || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Users</div>
+            </div>
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{s.total_lost_items || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Lost Items</div>
+            </div>
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{s.total_found_items || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Found Items</div>
+            </div>
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800 }}>{s.total_matches || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>AI Matches</div>
+            </div>
+            <div className="card" style={{ padding: '16px' }}>
+              <div style={{ fontSize: '1.6rem', fontWeight: 800, color: '#d97706' }}>{s.pending_claims || 0}</div>
+              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>Pending Claims</div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ==================== 11. LOGIN VIEW ==================== */
+    function LoginView({ navigate, onLogin }) {
+      const [email, setEmail] = useState('');
+      const [pass, setPass] = useState('');
+      const [error, setError] = useState('');
+
+      const handleLogin = (e) => {
+        e.preventDefault();
+        api.post('/auth/login/', { email, password: pass })
+          .then(r => onLogin(r.data.user, r.data.access, r.data.refresh))
+          .catch(err => setError('Invalid email or password.'));
+      };
+
+      return (
+        <div className="container" style={{ padding: '60px 16px', maxWidth: '420px' }}>
+          <form onSubmit={handleLogin} className="card" style={{ padding: '28px' }}>
+            <h2 style={{ textAlign: 'center', marginBottom: '16px' }}>Sign In</h2>
+            {error && <div style={{ color: '#dc2626', marginBottom: '10px', fontSize: '0.85rem' }}>{error}</div>}
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input type="email" required className="form-input" value={email} onChange={e => setEmail(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password</label>
+              <input type="password" required className="form-input" value={pass} onChange={e => setPass(e.target.value)} />
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '10px' }}>Sign In</button>
+
+            <div style={{ marginTop: '16px', background: '#f8fafc', padding: '10px', borderRadius: '6px', fontSize: '0.75rem' }}>
+              <strong>Quick Demo Fill:</strong><br/>
+              <a href="#" onClick={(e) => { e.preventDefault(); setEmail('admin@smartlostfound.com'); setPass('Admin@12345'); }}>Admin: admin@smartlostfound.com / Admin@12345</a><br/>
+              <a href="#" onClick={(e) => { e.preventDefault(); setEmail('john.doe@example.com'); setPass('User@12345'); }}>User: john.doe@example.com / User@12345</a>
+            </div>
+          </form>
+        </div>
+      );
+    }
+
+    /* ==================== 12. REGISTER VIEW ==================== */
+    function RegisterView({ navigate, onLogin }) {
+      const [name, setName] = useState('');
+      const [email, setEmail] = useState('');
+      const [pass, setPass] = useState('');
+      const [cpass, setCpass] = useState('');
+
+      const handleRegister = (e) => {
+        e.preventDefault();
+        if (pass !== cpass) return alert("Passwords do not match");
+        api.post('/auth/register/', { full_name: name, email, password: pass, confirm_password: cpass, role: 'user' })
+          .then(r => onLogin(r.data.user, r.data.access, r.data.refresh))
+          .catch(err => alert("Registration failed. Please check inputs."));
+      };
+
+      return (
+        <div className="container" style={{ padding: '60px 16px', maxWidth: '420px' }}>
+          <form onSubmit={handleRegister} className="card" style={{ padding: '28px' }}>
+            <h2 style={{ textAlign: 'center', marginBottom: '16px' }}>Create Account</h2>
+            <div className="form-group">
+              <label className="form-label">Full Name</label>
+              <input type="text" required className="form-input" value={name} onChange={e => setName(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Email Address</label>
+              <input type="email" required className="form-input" value={email} onChange={e => setEmail(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Password (Min 8 characters &amp; 1 digit)</label>
+              <input type="password" required className="form-input" value={pass} onChange={e => setPass(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Confirm Password</label>
+              <input type="password" required className="form-input" value={cpass} onChange={e => setCpass(e.target.value)} />
+            </div>
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '10px' }}>Register</button>
+          </form>
+        </div>
+      );
+    }
+
+    /* ==================== 13. ITEM DETAIL VIEW ==================== */
+    function ItemDetailView({ navigate, param }) {
+      const [item, setItem] = useState(null);
+
+      useEffect(() => {
+        if (param) {
+          const endpoint = param.type === 'lost' ? `/lost-items/${param.id}/` : `/found-items/${param.id}/`;
+          api.get(endpoint).then(r => setItem(r.data)).catch(() => {});
+        }
+      }, [param]);
+
+      if (!item) return <div style={{ textAlign: 'center', padding: '80px' }}>Loading item...</div>;
+
+      return (
+        <div className="container" style={{ padding: '30px 16px', maxWidth: '800px' }}>
+          <button onClick={() => navigate(param.type)} className="btn btn-outline" style={{ marginBottom: '16px' }}>&larr; Back</button>
+          <div className="card" style={{ padding: '24px' }}>
+            <h1>{item.title}</h1>
+            <p style={{ color: '#64748b', margin: '8px 0 16px 0' }}>{item.category} &bull; Colour: {item.colour} &bull; 📍 {item.location_area}, {item.city}</p>
+            <p style={{ lineHeight: 1.6, marginBottom: '20px' }}>{item.description}</p>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={() => navigate('matches')} className="btn btn-primary">✨ Check AI Matches</button>
+              {param.type === 'found' && (
+                <button onClick={() => navigate('claims', { foundId: item.id })} className="btn btn-secondary">🛡️ Claim Belonging</button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Render the App into the root container
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+  {% endverbatim %}
+</body>
+</html>
